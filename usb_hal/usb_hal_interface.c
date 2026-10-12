@@ -1030,6 +1030,12 @@ static int usb_dev_hal_init(struct usb_hal* usb_hal)
 	struct usb_device *udev = usb_dev->udev;
 
 	ret = usb_dev->hal_dev->funcs->get_chip_id(udev, &usb_hal->chip_id);
+	if (ret && usb_hal_err_is_unreachable(ret)) {
+		/* The first transfer after enumeration: the dongle is gone
+		 * again, it will be probed anew when it comes back. */
+		dev_warn(&udev->dev, "chip not responding (ret=%d), waiting for it to re-enumerate\n", ret);
+		return ret;
+	}
 	if (ret) {
 		dev_err(&udev->dev, "get chip id failed! ret=%d\n", ret);
 		return -ENOENT;
@@ -1105,24 +1111,27 @@ struct usb_hal* usb_hal_init(struct usb_interface *interface, const struct usb_d
 
     if (!interface || !id || !fifo) {
         printk("%s: null pointer!\n", __func__);
-        return NULL;
+        return ERR_PTR(-EINVAL);
     }
 
     usb_hal = kzalloc(sizeof(*usb_hal), GFP_KERNEL);
     if (!usb_hal) {
         dev_err(&udev->dev, "kzalloc usb_hal failed!\n");
+        ret = -ENOMEM;
         goto err;
     }
 
     usb_dev = kzalloc(sizeof(*usb_dev), GFP_KERNEL);
     if (!usb_dev) {
         dev_err(&udev->dev, "kzalloc usb_hal_dev failed!\n");
+        ret = -ENOMEM;
         goto err;
     }
 
     usb_dev->hal_dev = msdisp_hal_find_dev(id, udev);
     if (!usb_dev->hal_dev) {
         dev_err(&udev->dev, "Can't find hal dev! vid=0x%x pid=0x%x\n", id->idVendor, id->idProduct);
+        ret = -ENOENT;
         goto err;
     }
 
@@ -1145,7 +1154,8 @@ struct usb_hal* usb_hal_init(struct usb_interface *interface, const struct usb_d
 
     ret = usb_dev_hal_init(usb_hal);
 	if (ret) {
-		dev_err(&udev->dev, "usb dev hal init failed! ret=%d\n", ret);
+		if (!usb_hal_err_is_unreachable(ret))
+			dev_err(&udev->dev, "usb dev hal init failed! ret=%d\n", ret);
         goto err;
 	} else {
 		dev_info(&udev->dev, "chip id:0x%x port:0x%x sdram:0x%x\n", usb_hal->chip_id, usb_hal->port_type, usb_hal->sdram_type);
@@ -1189,8 +1199,14 @@ err:
         usb_hal = NULL;
     }
 
+    /* Some helpers return a positive status; ERR_PTR() needs an errno. */
+    if (ret >= 0)
+        ret = -ENODEV;
+    pr_info("init usb_hal%d failed! ret=%d\n", index, ret);
+    return ERR_PTR(ret);
+
 out:
-    printk("init usb_hal%d %s!\n", index, usb_hal ? "success" : "failed");
+    pr_info("init usb_hal%d success!\n", index);
     return usb_hal;
 }
 
@@ -1216,7 +1232,7 @@ void usb_hal_destroy(struct usb_hal* hal)
     kfree(usb_dev);
     kfree(hal);
 	
-	printk("dstroy usb_hal%d success!\n", index);
+	pr_info("destroy usb_hal%d success!\n", index);
 }
 
 void usb_hal_init_gpio(struct usb_hal* hal)

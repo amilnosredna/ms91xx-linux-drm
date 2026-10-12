@@ -17,6 +17,7 @@
 
 #include <linux/types.h>
 #include <linux/mutex.h>
+#include <linux/errno.h>
 
 
 struct usb_interface;
@@ -81,6 +82,18 @@ struct usb_hal {
 
 struct usb_hal* usb_intf_device_to_hal_func(struct device* dev);
 
+/* Errors a control transfer returns when the dongle is not on the bus (any
+ * more, or yet): it was unplugged, or it is rebooting itself. Seen on every
+ * resume from hibernation, where the dongle drops off the bus right after it
+ * enumerates and comes back about 6 s later. These are not driver faults, so
+ * they are logged as warnings rather than errors. */
+static inline bool usb_hal_err_is_unreachable(int err)
+{
+	return err == -ENODEV || err == -ESHUTDOWN || err == -EPROTO ||
+	       err == -EILSEQ || err == -ETIME;
+}
+
+/* Returns an ERR_PTR() on failure, never NULL. */
 struct usb_hal* usb_hal_init(struct usb_interface *interface, const struct usb_device_id *id, struct kfifo* fifo, u32 index);
 void usb_hal_destroy(struct usb_hal* hal);
 

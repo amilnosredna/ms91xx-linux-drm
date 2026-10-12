@@ -271,9 +271,12 @@ static int ms9132_hid_report(struct usb_device*udev, int is_set, void* report, i
         value, index, buf, len, timeout);
 
     if (rtn < 0) {
-        u8* tmp = (u8*)report;
-        dev_err(&udev->dev, "ms9132 %s report failed! rtn =%d\n", is_set ? "set" : "get", rtn);
-        dev_err(&udev->dev, "report: %02x %02x %02x %02x %02x %02x %02x %02x\n", tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7]);
+        if (usb_hal_err_is_unreachable(rtn))
+            dev_warn_ratelimited(&udev->dev, "ms9132 %s report failed! rtn =%d report: %*ph\n",
+                is_set ? "set" : "get", rtn, min(len, 8), report);
+        else
+            dev_err_ratelimited(&udev->dev, "ms9132 %s report failed! rtn =%d report: %*ph\n",
+                is_set ? "set" : "get", rtn, min(len, 8), report);
         goto out;
     }
 
@@ -284,7 +287,9 @@ out:
     if (buf) {
         kfree(buf);
     }
-    return (rtn < 0 ? 1 : 0);
+    /* Pass the errno up (it used to be flattened to 1), so callers can tell
+     * a dongle that left the bus from a real failure. */
+    return (rtn < 0 ? rtn : 0);
 }
 
 static int ms9132_read_xdata_once(struct usb_device* udev, u16 addr, u8* buf, u8 read_cnt)

@@ -234,8 +234,12 @@ static int msdisp_usb_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, usb_dev);
 	global_id = msdisp_drm_get_pipeline_global_id(usb_dev->drm, usb_dev->pipeline_index);
 	usb_dev->hal = usb_hal_init(interface, id, fifo, global_id);
-	if (!usb_dev->hal) {
-		dev_err(&udev->dev, "usb hal init failed!!\n");
+	if (IS_ERR(usb_dev->hal)) {
+		ret = PTR_ERR(usb_dev->hal);
+		usb_dev->hal = NULL;
+		/* Already reported as a warning by usb_hal_init(). */
+		if (!usb_hal_err_is_unreachable(ret))
+			dev_err(&udev->dev, "usb hal init failed!! ret=%d\n", ret);
 		ret = -ENODEV;
         goto fail;
 	}
